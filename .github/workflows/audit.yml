@@ -1,0 +1,56 @@
+# Weekly-audit harness: validates the theme files and that the README's
+# install instructions point at things that actually exist in the repo.
+name: audit
+
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/audit.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: json_parses
+        continue-on-error: true
+        run: for f in $(git ls-files '*.json'); do jq empty "$f" && echo "ok $f"; done
+      - id: colors_valid   # every string value that looks like a colour must be 0xAARRGGBB
+        continue-on-error: true
+        run: |
+          bad=$(for f in $(git ls-files '*.json'); do
+            jq -r --arg f "$f" '.. | strings | select(startswith("0x")) | select(test("^0x[0-9A-Fa-f]{8}$") | not) | "\($f): \(.)"' "$f"
+          done)
+          [ -z "$bad" ] || { echo "$bad"; exit 1; }
+      - id: plugin_folder_shape   # one *.flowy_plugin dir holding a .dark and .light json
+        continue-on-error: true
+        run: |
+          d=$(ls -d *.flowy_plugin); echo "$d"
+          ls "$d"/*.dark.json "$d"/*.light.json
+      - id: readme_folder_exists   # README step 1 names the folder to download
+        continue-on-error: true
+        run: |
+          name=$(grep -oE '`[^`]+\.flowy_plugin`' README.md | head -1 | tr -d '`'); echo "README says: $name"
+          test -d "$name"
+      - id: readme_theme_name_exists   # README step 5 names the dropdown entry
+        continue-on-error: true
+        run: |
+          want=$(grep -oE 'Select \*\*[^*]+\*\*' README.md | sed 's/Select \*\*//; s/\*\*//'); echo "README says: $want"
+          jq -r '.name // empty' *.flowy_plugin/*.json | tee /dev/stderr | grep -qxF "$want"
+      - id: secret_scan
+        continue-on-error: true
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: summary
+        if: always()
+        env:
+          STEPS: ${{ toJSON(steps) }}
+        run: |
+          echo "$STEPS" | jq -r 'to_entries[] | "AUDIT \(.key): \(.value.outcome)"' | tee -a "$GITHUB_STEP_SUMMARY"
+          ! echo "$STEPS" | jq -e 'to_entries[] | select(.value.outcome=="failure")' >/dev/null
