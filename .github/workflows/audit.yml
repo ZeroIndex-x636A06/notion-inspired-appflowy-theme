@@ -14,7 +14,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - id: json_parses
@@ -52,5 +52,5 @@ jobs:
         env:
           STEPS: ${{ toJSON(steps) }}
         run: |
-          echo "$STEPS" | jq -r 'to_entries[] | "AUDIT \(.key): \(.value.outcome)"' | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "$STEPS" | jq -r 'to_entries[] | select(.key|test("^[0-9a-f]{32}$")|not) | "AUDIT \(.key): \(.value.outcome)"' | tee -a "$GITHUB_STEP_SUMMARY"
           ! echo "$STEPS" | jq -e 'to_entries[] | select(.value.outcome=="failure")' >/dev/null
